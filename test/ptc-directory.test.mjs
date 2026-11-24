@@ -48,10 +48,19 @@ async function code(ctx, agent, body) {
   const result = await executeCall(ctx, { name: 'run_code', callId: 'directory-call-' + ++sequence,
     agent, arguments: { description: 'Exercise PTC SDK selection', code: body } })
   assert.equal(result.isError, false, JSON.stringify(result))
-  return result.value.result
+  // The 0.2.3 scoped-repl publishes its displayed values as `value.logs`; the
+  // fixture reads back the first inspection, evaluated as the program's literal.
+  return result.value.logs[0]
 }
-const callable = (ctx, agent, raw) => code(ctx, agent, `return typeof tools.${publicToolName(raw)}==='function';`)
-const load = (ctx, agent, tools) => code(ctx, agent, `return await tools.${loader}({tools:${JSON.stringify(tools)}});`)
+const callable = async (ctx, agent, raw) => JSON.parse((await code(ctx, agent, `inspect(JSON.stringify(typeof tools.${publicToolName(raw)}==='function'));`)).replace(/\n$/, ''))
+const load = async (ctx, agent, tools) => {
+  // The scoped REPL awaits only top-level expressions; binding calls inside a nested
+  // async helper stay unawaited Promises, so the loader result is captured into a
+  // uniquely named top-level await before it is inspected as JSON.
+  const slot = `__loaded_${++sequence}`
+  const raw = await code(ctx, agent, `const ${slot} = await tools.${loader}({tools:${JSON.stringify(tools)}}); inspect(JSON.stringify(${slot}));`)
+  return JSON.parse(raw.replace(/\n$/, ''))
+}
 
 await test('resident directory is at most one pointer; the loader schema owns names and selection semantics', () => {
   assert.equal(renderSdkDirectory([], new Set()), '')

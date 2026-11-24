@@ -6,6 +6,7 @@ import Sandbox from '@deepseek-ai/dsh-sandbox-local'
 import FileSystem from '@deepseek-ai/dsh-fs-local'
 import fs from 'node:fs/promises'
 import path from 'node:path'
+import { createHash } from 'node:crypto'
 import { getEncoding } from 'js-tiktoken'
 import { createJsonDigestProjection, jsonDigest } from '../lib/shells/json-digest.js'
 import { hostForeground, renderHostBash } from '../lib/shells/host-contract.js'
@@ -14,12 +15,16 @@ import { bashToolDefinition } from '../lib/shells.js'
 import { publicToolName } from '../lib/policy.js'
 import { assert, report, test, withTempDir } from './lib/harness.mjs'
 import { bootHost, shutdown } from './lib/host.mjs'
+import { ptcProgramValue } from './lib/ptc-readback.mjs'
 
 const raw = JSON.stringify({ items: Array.from({ length: 1200 }, (_, index) => ({ index, status: index === 1199 ? 'failed' : 'ok', name: 'item name '.repeat(8) })) })
 const call = (extra = {}) => ({ token: Symbol('call'), signal: new AbortController().signal, ...extra })
 const value = file => hostForeground({ exitCode: 0, timedOut: false, timeoutMs: 1000,
   stdout: { text: raw.slice(-65536), truncated: true, spillPath: file }, stderr: { text: 'stderr is preserved', truncated: false } })
 const outcome = value => ({ isError: false, value, content: [{ type: 'text', text: renderHostBash(value) }] })
+const digestOf = value => ({ status: value.status, exitCode: value.exitCode,
+  stdout: { truncated: value.stdout.truncated, spillPath: value.stdout.spillPath, sha256: createHash('sha256').update(value.stdout.text).digest('hex') },
+  stderr: value.stderr.text })
 
 await test('large JSON has bounded samples, error examples, recovery and measured token reduction', () => {
   const text = jsonDigest(raw, '/private/original.log')
@@ -125,9 +130,9 @@ await test('real host registry applies Native projection and preserves nested SD
       await new Promise(resolve => setImmediate(resolve))
       let lift, executorContext
       await agent.ctx.plugin({ inject: ['tools', 'systemPrompt'], apply(inner) { executorContext = inner; lift = selectExecutor(inner, 'ptc') } })
-      const transport = await call({ agent, name: 'run_code', callId: 'outer-digest', arguments: { description: 'Read a nested Bash JSON result', code: `return await tools.${publicToolName('bash')}({ command: 'produce-json', description: 'Produce a large JSON result' });` }, signal: new AbortController().signal })
+      const transport = await call({ agent, name: 'run_code', callId: 'outer-digest', arguments: { description: 'Read a nested Bash JSON result', code: `const __ptc_value = await tools.${publicToolName('bash')}({ command: 'produce-json', description: 'Produce a large JSON result' }); const nodeCrypto = await import('node:crypto'); inspect(JSON.stringify({ status: __ptc_value.status, exitCode: __ptc_value.exitCode, stdout: { truncated: __ptc_value.stdout.truncated, spillPath: __ptc_value.stdout.spillPath, sha256: nodeCrypto.createHash('sha256').update(__ptc_value.stdout.text).digest('hex') }, stderr: __ptc_value.stderr.text }));` }, signal: new AbortController().signal })
       assert.equal(transport.isError, false, JSON.stringify(transport)); assert.equal(nested.isError, false)
-      assert.deepEqual(transport.value.result, original)
+      assert.deepEqual(ptcProgramValue(transport), digestOf(original))
       assert.equal(nested.content[0].text, renderHostBash(original))
       lift(); selectExecutor(executorContext, 'native')
       for (const [decision, expected] of [

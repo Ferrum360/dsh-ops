@@ -39,7 +39,7 @@ await test('real Native and Node PTC dispatch enforce the configured guard and d
     assert.equal(denied.isError, true, JSON.stringify(denied))
     assert.match(JSON.stringify(denied), /DOWNLOAD_TO_FILE|configured downloader/)
     assert.equal(calls, 0, 'the real tool must not run')
-    const nested = await execute(ptc, 'run_code', { description: 'Check the download refusal', code: `return await tools.${toolName}({command:${JSON.stringify(command)}});` })
+    const nested = await execute(ptc, 'run_code', { description: 'Check the download refusal', code: `const __ptc_refusal = await tools.${toolName}({command:${JSON.stringify(command)}}).then(value => ({ value }), error => ({ error: String(error?.message ?? error) })); inspect(JSON.stringify(__ptc_refusal));` })
     assert.match(JSON.stringify(nested), /DOWNLOAD_TO_FILE|configured downloader/)
     assert.equal(calls, 0, 'the PTC nested tool must not run')
     const allowed = await execute(native, toolName, { command: 'node download.cjs --help' })

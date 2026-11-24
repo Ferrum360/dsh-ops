@@ -1,4 +1,5 @@
 import { selectExecutor, executeCall, prepareStep } from './lib/executor.mjs'
+import { ptcProgramValue } from './lib/ptc-readback.mjs'
 import { createScope } from '@deepseek-ai/dsh-scope'
 import Subprocess from '@deepseek-ai/dsh-subprocess-local'
 import Sandbox from '@deepseek-ai/dsh-sandbox-local'
@@ -56,8 +57,8 @@ await test('the owning consumer observes real Native/PTC results and keeps untri
     assert.equal((await hints(native)).length, 1)
     await execute(native, BASH_TOOL, { command: 'sleep 40' }); assert.equal((await hints(native)).length, 1)
     assert.equal(JSON.stringify(await sections(untouched)), before, 'untriggered prompt bytes stay identical')
-    const nested = await execute(ptc, 'run_code', { description: 'Observe a successful delay result', code: `return await tools.${BASH_TOOL}({command:'sleep 30'});` })
-    assert.equal(nested.isError, false, JSON.stringify(nested)); assert.equal((await hints(ptc)).length, 1)
+    const nested = await execute(ptc, 'run_code', { description: 'Observe a successful delay result', code: `const __ptc_value = await tools.${BASH_TOOL}({command:'sleep 30'}); inspect(JSON.stringify(__ptc_value));` })
+    assert.equal(nested.isError, false, JSON.stringify(nested)); assert.deepEqual(ptcProgramValue(nested), { status: 'completed', exitCode: 0 }); assert.equal((await hints(ptc)).length, 1)
     removeJobs(); assert.equal((await hints(native)).length, 0, 'absence of the wait tool withdraws guidance')
     removeJobs = ctx.tools.register(jobs)
     allowed = false; assert.equal((await hints(native)).length, 0, 'live ownership is authoritative')
