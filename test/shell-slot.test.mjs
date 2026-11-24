@@ -164,6 +164,19 @@ for (const preset of ['standard', 'cordis']) {
   }))
 }
 
+// Detection turns the companion linkage on when dsh-win-pwsh7 is installed, and the
+// linkage locks every hide switch off. Probe what this host reports so an implicit
+// intent is not asserted against a machine that has the companion.
+const linkedOnHost = await withTempDir('shell-slot-link-probe', async cwd => {
+  const { ctx, mint, assemble } = await boot(cwd)
+  try {
+    await ctx.plugin(Bundle, { ...minimalOnly })
+    const names = (await assemble(await mint('link-probe'))).tools.map(tool => tool.name)
+    if (names.includes('pwsh')) console.log('       dsh-win-pwsh7 detected on this host; the linkage keeps the host PowerShell visible')
+    return names.includes('pwsh')
+  } finally { await shutdown(ctx) }
+})
+
 for (const [label, config, hidden] of [
   ['default intent', { global: { hidePwsh: true } }, true],
   ['explicit opt-out', { minimal: { hidePwsh: false } }, false],
@@ -180,8 +193,12 @@ for (const [label, config, hidden] of [
     const agent = await mint('hide')
     const stepNames = (await assemble(agent)).tools.map(tool => tool.name)
     if (config.minimal?.bashPath) assert.equal(stepNames.includes(BASH_TOOL), false)
-    assert.equal(stepNames.includes('pwsh'), !(hidden && process.platform === 'win32'))
-    assert.equal(stepNames.includes('pwsh_persistent'), !(hidden && process.platform === 'win32'))
+    // An intent that names no linkage follows detection, so on a host with the
+    // companion the tools stay visible; an explicit linkage choice decides either way.
+    const implicitLink = config.other?.pwsh7Link === undefined
+    const expectedHidden = hidden && !(linkedOnHost && implicitLink)
+    assert.equal(stepNames.includes('pwsh'), !(expectedHidden && process.platform === 'win32'))
+    assert.equal(stepNames.includes('pwsh_persistent'), !(expectedHidden && process.platform === 'win32'))
   } finally { await shutdown(ctx) }
 }))
 

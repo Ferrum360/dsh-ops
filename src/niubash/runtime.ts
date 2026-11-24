@@ -110,11 +110,11 @@ export async function prepareNiubashVersion(source: string, target: string, { re
     if (damage) throw new Error(`${UNAVAILABLE} Niubash prepared runtime repair failed: existing version: ${damage.message}; fresh preparation: ${error instanceof Error ? error.message : String(error)}`)
     throw error
   } finally {
+    // A builder that lost the publication race still owns its staging copy beside the
+    // winner's tree; a builder that published has no staging copy left to retire.
+    if (scratch && fs.existsSync(scratch) && !retirePreparedNiubash(scratch)) console.error(`dsh-ops: could not retire Niubash preparation scratch ${scratch}`)
     if (file && retireOthers) reclaimPreparedNiubash(target)
-    else {
-      if (scratch && fs.existsSync(scratch) && !retirePreparedNiubash(scratch)) console.error(`dsh-ops: could not retire Niubash preparation scratch ${scratch}`)
-      if (broken && !retirePreparedNiubash(broken)) console.error(`dsh-ops: could not retire damaged Niubash prepared version ${broken}`)
-    }
+    else if (broken && !retirePreparedNiubash(broken)) console.error(`dsh-ops: could not retire damaged Niubash prepared version ${broken}`)
   }
 }
 
