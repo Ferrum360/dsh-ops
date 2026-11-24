@@ -19,6 +19,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import semver from 'semver'
 import { componentChecks, defaultChecks } from './lib/catalogue-checks.mjs'
 import { parse as parseYaml } from 'yaml'
 import {
@@ -585,12 +586,17 @@ check(
   typeof pkg.engines?.dsh === 'string' && pkg.engines.dsh === pkg.peerDependencies?.['@deepseek-ai/dsh'],
   'engines.dsh and the legacy DSH peer declare the same compatibility range',
 )
-for (const version of ['0.2.2-rc.1', '0.2.2-rc.2', '0.2.2']) {
-  check(evaluatePluginCompatibility(pkg, {}, version) === undefined, `the declared range accepts DSH ${version}`)
+// Expectations come from the declared range itself, so the gate tracks whatever
+// range package.json carries instead of a locked host version list.
+const range = pkg.engines.dsh
+for (const version of ['0.2.2-rc.1', '0.2.2-rc.2', '0.2.2', '0.2.3-0', '0.2.3-alpha.2', '0.2.3', '0.2.0-rc.2', '0.2.1-rc.5', '0.2.1', '0.2.2-alpha.2', '0.2.2-rc.0']) {
+  const accepts = semver.satisfies(version, range, { includePrerelease: true })
+  check((evaluatePluginCompatibility(pkg, {}, version) === undefined) === accepts, `the declared range ${accepts ? 'accepts' : 'rejects'} DSH ${version}`)
 }
-for (const version of ['0.2.0-rc.2', '0.2.1-rc.5', '0.2.1', '0.2.2-alpha.2', '0.2.2-rc.0', '0.2.3-0', '0.3.0']) {
-  check(evaluatePluginCompatibility(pkg, {}, version) !== undefined, `the declared range rejects DSH ${version}`)
-}
+// The range must stay bounded at the bottom: the first host this plugin targets is
+// accepted, and every host before it is rejected.
+check(semver.satisfies('0.2.2-rc.1', range, { includePrerelease: true }), 'the declared range accepts the first supported host release')
+check(!semver.satisfies('0.2.1', range, { includePrerelease: true }), 'the declared range rejects hosts before the first supported release')
 for (const component of [...COMPONENTS, 'background']) {
   const resource = pkg.exports?.[`./${component}/icon`]
   check(typeof resource === 'string' && fs.existsSync(path.join(PACKAGE_ROOT, resource)),

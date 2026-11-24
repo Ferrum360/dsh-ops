@@ -45,18 +45,52 @@ export async function bootHost({ withTools = true, withSystemPrompt = true, keep
     // it buries the assertions. Failures are asserted, not scrolled past.
     ctx.logger.level = 0
   }
-  // The 0.2.3 session projection derives its cell window from each event's seq, and
-  // fixtures emit `{ type: 'step/end' }` with none - that throws SessionSeq/SessionLogOffset
-  // inside the projection's drive. A wrapper supplies a monotonic seq for session/event,
-  // so fixtures stay as written and a real host's own seqs pass through untouched.
+  // The 0.2.3 session projection drives every unit straight from the Session: it
+  // reads `snapshotEvents()`/`eventAt(seq)` and folds a contiguous seq prefix, so a
+  // fixture session object must carry the same committed-log face. Fixtures commit
+  // through both `ctx.serial` and `ctx.emit`, so both paths keep a per-session
+  // append-only log and stamp each event with that session's own seq; the read
+  // methods are defined non-enumerably, so `assert.deepEqual` over a fixture still
+  // sees exactly the fields it declared.
   const serial = ctx.serial.bind(ctx)
-  let eventSeq = 0
-  ctx.serial = async (name, ...args) => {
-    const event = args[1]
-    if (name === 'session/event' && event && typeof event === 'object' && event.seq === undefined) {
-      args[1] = { ...event, seq: ++eventSeq }
+  const emit = ctx.emit.bind(ctx)
+  const fixtureLog = new WeakMap()
+  const commitFixtureEvent = (session, event) => {
+    if (!session || typeof session !== 'object' || !event || typeof event !== 'object') return event
+    let log = fixtureLog.get(session)
+    if (log === undefined) {
+      log = []
+      fixtureLog.set(session, log)
     }
+    const stamped = { ...event, seq: log.length }
+    log.push(Object.freeze(stamped))
+    if (typeof session.snapshotEvents !== 'function') {
+      Object.defineProperty(session, 'snapshotEvents', {
+        value: (from = 0, to = log.length) => Object.freeze(log.slice(Number(from), Number(to))),
+        enumerable: false, writable: true, configurable: true,
+      })
+    }
+    if (typeof session.eventAt !== 'function') {
+      Object.defineProperty(session, 'eventAt', {
+        value: (seq) => log[Number(seq)],
+        enumerable: false, writable: true, configurable: true,
+      })
+    }
+    if (session.seq === undefined) {
+      Object.defineProperty(session, 'seq', {
+        get: () => (log.length === 0 ? -1 : log.length - 1),
+        enumerable: false, configurable: true,
+      })
+    }
+    return stamped
+  }
+  ctx.serial = async (name, ...args) => {
+    if (name === 'session/event') args[1] = commitFixtureEvent(args[0], args[1])
     return serial(name, ...args)
+  }
+  ctx.emit = (name, ...args) => {
+    if (name === 'session/event') args[1] = commitFixtureEvent(args[0], args[1])
+    return emit(name, ...args)
   }
   // The 0.2.3 prompt service declares `inject: ['sessionProjections']`; without it
   // the prompt registry never activates, and the tool registry - which injects the
