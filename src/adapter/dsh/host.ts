@@ -6,6 +6,14 @@ import { homedir } from 'node:os'
 import { realpathSync } from 'node:fs'
 import type { AtomicApi, BootApi, Context } from './types.js'
 
+/** DSH 0.2.3 addresses the root context by symbol: `ctx[Context.root]`. `Symbol.for` names the
+ *  same registered symbol the host exports, so reading it needs no value import of Cordis.
+ *  That keeps the adapter boundary and the lazy-load rule intact. */
+export function hostRoot<T extends object>(ctx: T): T | undefined {
+  return (ctx as { [key: symbol]: unknown })[Symbol.for('cordis.root')] as T | undefined
+}
+
+
 export interface CarrierHost { boot: BootApi; yaml: typeof import('yaml'); atomic: AtomicApi }
 
 /** Resolve a DSH message constructor only when an admitted message is created. */

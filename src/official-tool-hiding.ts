@@ -176,8 +176,11 @@ export function apply(root: Context, raw?: unknown): void {
         ? blocked(`official tool ${exec.name} is selected for replacement`) : undefined
     }
     ctx.on('tools/pre-execute', async (exec, next) => {
-      const reason = refusal(exec)
-      return reason ? { kind: 'deny', reason, info: { name: 'ReadinessError', code: 'READINESS_BLOCKED' } } : next()
+      const denial = refusal(exec)
+      if (!denial) return next()
+      // 0.2.3 guards may return a structured denial; the presentation event still needs a plain reason.
+      const reason = typeof denial === 'string' ? denial : denial.reason
+      return { kind: 'deny', reason, info: { name: 'ReadinessError', code: 'READINESS_BLOCKED' } }
     })
     if (typeof tools.guard === 'function') ctx.effect(() => ctx.tools.guard(refusal), 'dsh-ops: replacement surface guard')
     ctx.on('system-prompt/assemble', async (assembly, context, next) => {

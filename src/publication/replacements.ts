@@ -269,7 +269,7 @@ export function mountReplacements(root: Context, publication: ReplacementPublica
         if (!drop.has(section.name)) return [section]
         if (noted || note === undefined) return []
         noted = true
-        return [{ name: `dsh-ops:replaced-official:${mode}`, text: note, interpolate: false as const }]
+        return [{ name: `dsh-ops:replaced-official:${mode}`, text: note, interpolate: false as const, order: section.order }]
       })
       return { ...result, sections }
     })

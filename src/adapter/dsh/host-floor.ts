@@ -66,6 +66,24 @@ export function declaredHostFloor(): string | undefined {
   return floor?.[1]
 }
 
+/**
+ * The upper bound engines.dsh names, when it names one; undefined means the
+ * package declares no ceiling, so a newer host generation loads as before.
+ */
+export function declaredHostCeiling(): string | undefined {
+  if (cache === undefined) declaredHostFloor()
+  if (cache === undefined || cache === null) return undefined
+  const at = cache.indexOf('<')
+  if (at === -1) return undefined
+  const token = cache.slice(at + 1).trim().split(' ')[0] ?? ''
+  return parseSemVer(token) === undefined ? undefined : token
+}
+
+/** Whether an actual host version sorts at or above the declared ceiling. */
+export function versionAtOrAboveCeiling(actual: string, ceiling: string): boolean {
+  const left = parseSemVer(actual), right = parseSemVer(ceiling)
+  return left !== undefined && right !== undefined && !precedes(left, right)
+}
 /** One read of the declared engines.dsh range; null marks "no floor declared". */
 let cache: string | null | undefined
 
@@ -88,10 +106,14 @@ export function versionBelowFloor(actual: string, floor: string): boolean {
  */
 export async function assertHostFloor(ctx: Context): Promise<void> {
   const floor = declaredHostFloor()
-  if (floor === undefined) return
+  const ceiling = declaredHostCeiling()
+  if (floor === undefined && ceiling === undefined) return
   const { runtimeVersion: version } = await runtimeVersion(ctx)
   if (version === 'unknown') return
-  if (versionBelowFloor(version, floor)) {
+  if (floor !== undefined && versionBelowFloor(version, floor)) {
     throw new Error(`This dsh-ops build requires DSH ${floor} or newer (package.json engines.dsh); the running host reports ${version}. Upgrade the host runtime instead of reloading this plugin: an older host loads it halfway at best, showing TypeError scope errors backstage and EXECUTOR_UNAVAILABLE in front.`)
+  }
+  if (ceiling !== undefined && versionAtOrAboveCeiling(version, ceiling)) {
+    throw new Error(`This dsh-ops build targets DSH below ${ceiling} (package.json engines.dsh); the running host reports ${version}. This host generation changes the plugin contract, so rebuild this package against the running host or grant a version exemption.`)
   }
 }

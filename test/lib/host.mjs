@@ -45,6 +45,29 @@ export async function bootHost({ withTools = true, withSystemPrompt = true, keep
     // it buries the assertions. Failures are asserted, not scrolled past.
     ctx.logger.level = 0
   }
+  // The 0.2.3 session projection derives its cell window from each event's seq, and
+  // fixtures emit `{ type: 'step/end' }` with none - that throws SessionSeq/SessionLogOffset
+  // inside the projection's drive. A wrapper supplies a monotonic seq for session/event,
+  // so fixtures stay as written and a real host's own seqs pass through untouched.
+  const serial = ctx.serial.bind(ctx)
+  let eventSeq = 0
+  ctx.serial = async (name, ...args) => {
+    const event = args[1]
+    if (name === 'session/event' && event && typeof event === 'object' && event.seq === undefined) {
+      args[1] = { ...event, seq: ++eventSeq }
+    }
+    return serial(name, ...args)
+  }
+  // The 0.2.3 prompt service declares `inject: ['sessionProjections']`; without it
+  // the prompt registry never activates, and the tool registry - which injects the
+  // prompt - stays unresolvable too. Mount the projection when the installed
+  // generation ships it; the 0.2.2 generation needs no projection at all.
+  try {
+    const SessionProjection = (await import('@deepseek-ai/dsh-session-projection')).default
+    if (SessionProjection) await ctx.plugin(SessionProjection, {})
+  } catch {
+    // Older generations have no such package; the prompt mounts standalone.
+  }
   if (withSystemPrompt) {
     const SystemPrompt = (await import('@deepseek-ai/dsh-system-prompt')).default
     await ctx.plugin(SystemPrompt, {})
