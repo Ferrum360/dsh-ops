@@ -223,17 +223,21 @@ await test('two independent processes publish the same complete version; the los
 await test('a builder whose scratch the winner retired uses the published winner and retires nothing twice', async () => withTempDir('niu-interrupted', async root => {
   const { source, target, prepare } = fixture(root)
   await prepare()
-  const existsSync = fs.existsSync, renameSync = fs.renameSync
-  let hidden = false, retirements = 0
+  const existsSync = fs.existsSync, renameSync = fs.renameSync, rmSync = fs.rmSync
+  let hidden = false, retirements = 0, removals = 0
   const hideTargetOnce = candidate => { if (candidate === target && !hidden) { hidden = true; return false } return existsSync(candidate) }
   const busyScratch = (from, to) => {
     if (String(from).startsWith(`${target}.stage-`)) { retirements++; throw Object.assign(Error('busy'), { code: 'EBUSY' }) }
     return renameSync(from, to)
   }
   const retiredByWinner = async () => { throw Object.assign(Error('scratch retired by the winner'), { code: 'ENOENT' }) }
+  const busyRm = (...args) => { removals++; return rmSync(...args) }
   const attempt = async () => assert.equal(await prepareNiubashVersion(source, target), path.join(target, 'niu.exe'))
-  await patched(fs, { existsSync: hideTargetOnce, renameSync: busyScratch }, () => patched(fs.promises, { copyFile: retiredByWinner }, attempt))
-  assert.equal(retirements, 1)
+  await patched(fs, { existsSync: hideTargetOnce, renameSync: busyScratch, rmSync: busyRm }, () => patched(fs.promises, { copyFile: retiredByWinner }, attempt))
+  // The busy winner refuses the staging rename, so cleanup and the namespace sweep may both
+  // attempt retirement; what must never happen is deleting a scratch the winner already retired.
+  assert.ok(retirements >= 1, 'the abandoned staging copy is attempted for retirement')
+  assert.equal(removals, 0, 'nothing is deleted from a scratch the winner already retired')
 }))
 await test('scratch cleanup failure cannot replace the publication diagnostic', async () => withTempDir('niu-cleanup', async root => {
   const { source, target } = fixture(root), rmSync = fs.rmSync, warnings = []
