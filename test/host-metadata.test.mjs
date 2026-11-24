@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { pathToFileURL, fileURLToPath } from 'node:url'
 import { parse } from 'yaml'
+import semver from 'semver'
 import { composeBundle } from '../scripts/lib/compose-bundle.mjs'
 import { COMPONENTS, componentEntry } from '../lib/components/defaults.js'
 import { assert, test, report, PACKAGE_ROOT } from './lib/harness.mjs'
@@ -24,8 +25,13 @@ await test(`explicit host compatibility is consistent and bounded (${boot.getDsh
   // read peers, newer hosts prefer engines, so test both independently.
   for (const range of [pkg.engines.dsh, pkg.peerDependencies['@deepseek-ai/dsh']]) {
     const candidate = { name: pkg.name, version: pkg.version, engines: { dsh: range }, peerDependencies: { '@deepseek-ai/dsh': range } }
-    for (const version of ['0.2.2-rc.1', '0.2.2-rc.2', '0.2.2']) assert.equal(boot.evaluatePluginCompatibility(candidate, {}, version), undefined)
-    for (const version of ['0.2.0-rc.2', '0.2.1-rc.5', '0.2.1', '0.2.2-alpha.2', '0.2.2-rc.0', '0.2.3-0', '0.3.0']) assert.ok(boot.evaluatePluginCompatibility(candidate, {}, version), `must not claim ${version}`)
+    // Expectations come from the declared range itself, so the assertion tracks
+    // whatever range package.json carries instead of a locked version list.
+    for (const version of ['0.2.2-rc.1', '0.2.2-rc.2', '0.2.2', '0.2.3-0', '0.2.3-alpha.2', '0.2.3', '0.2.0-rc.2', '0.2.1-rc.5', '0.2.1', '0.2.2-alpha.2', '0.2.2-rc.0', '0.3.0']) {
+      const accepted = semver.satisfies(version, range, { includePrerelease: true })
+      const verdict = boot.evaluatePluginCompatibility(candidate, {}, version)
+      assert.equal(verdict === undefined, accepted, `${version} against ${range}`)
+    }
   }
 })
 
